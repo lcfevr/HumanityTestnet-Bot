@@ -174,7 +174,7 @@ if __name__ == '__main__':
                 if not claim_status:
                     all_claimed = False
 
-                n
+                
                 print(Fore.CYAN + "-------------------------------------------")
 
             if all_claimed:
