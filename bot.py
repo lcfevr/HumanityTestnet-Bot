@@ -119,24 +119,16 @@ def proceed_to_claim(sender_address, private_key):
         print(Fore.RED + f"❌ Error dalam proses klaim untuk {sender_address}: {str(e)}\n")
 
 # Function for countdown with spinner animation
-def countdown(seconds):
+def countdown(hours, minutes=0):
+    total_seconds = (hours * 3600) + (minutes * 60)
     spinner = itertools.cycle(['|', '/', '-', '\\'])
-    while seconds:
-        mins, secs = divmod(seconds, 60)
-        timer = f"{mins:02}:{secs:02}"
+    while total_seconds:
+        mins, secs = divmod(total_seconds, 60)
+        timer = f"{mins // 60:02}:{mins % 60:02}:{secs:02}"  # Format HH:MM:SS
         print(Fore.CYAN + f"\rMenunggu selama {timer} " + next(spinner), end="")
         time.sleep(1)
-        seconds -= 1
+        total_seconds -= 1
     print(Fore.CYAN + "\n🌟 Selesai menunggu!")
-
-# Loading animation
-def loading_animation(message):
-    spinner = itertools.cycle(['|', '/', '-', '\\'])
-    print(Fore.CYAN + message, end="")
-    for _ in range(20):  # Adjust the range for the loading duration
-        print(next(spinner), end="\r")
-        time.sleep(0.1)  # Adjust the speed of the spinner
-    print(" " * 20, end="\r")  # Clear the spinner
 
 # Main execution: display header, load private keys, and claim rewards for each
 if __name__ == "__main__":
@@ -148,4 +140,4 @@ if __name__ == "__main__":
             claim_rewards(private_key, i + 1)
 
         # Tunggu selama 2 jam (2 * 60 * 60 detik)
-        countdown(2 * 60 * 60 + 1 * 60)  # 2 jam 1 menit
+        countdown(24)  # 24 jam
