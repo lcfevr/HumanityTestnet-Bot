@@ -148,4 +148,4 @@ if __name__ == "__main__":
             claim_rewards(private_key, i + 1)
 
         # Tunggu selama 2 jam (2 * 60 * 60 detik)
-        countdown(2 * 1 * 1 + 1 * 60)  # 2 jam 1 menit
+        countdown(2 * 60 * 60 + 1 * 60)  # 2 jam 1 menit
