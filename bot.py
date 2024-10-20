@@ -8,6 +8,22 @@ from config import rpc_url, contract_address, contract_abi
 # Initialize colorama
 init(autoreset=True)
 
+# Address kontrak Reward Token (RWT)
+reward_token_address = "0x693cB8de384f00A5c2580D544B38013BFB496529"
+
+# ABI minimal untuk fungsi balanceOf ERC20
+erc20_abi = '''
+[
+    {
+        "constant": true,
+        "inputs": [{"name": "_owner", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "balance", "type": "uint256"}],
+        "type": "function"
+    }
+]
+'''
+
 # Header message
 def display_header():
     print(Fore.CYAN + Style.BRIGHT + "===============================")
@@ -28,11 +44,19 @@ else:
 # Load the contract
 contract = web3.eth.contract(address=Web3.to_checksum_address(contract_address), abi=contract_abi)
 
+# Load the reward token contract (RWT) with ERC20 minimal ABI
+reward_token_contract = web3.eth.contract(address=Web3.to_checksum_address(reward_token_address), abi=erc20_abi)
+
 # Function to load private keys from a text file
 def load_private_keys(file_path):
     with open(file_path, 'r') as file:
         private_keys = [line.strip() for line in file if line.strip()]
     return private_keys
+
+# Function to get RWT balance for an account
+def get_rwt_balance(account_address):
+    balance = reward_token_contract.functions.balanceOf(account_address).call()
+    return web3.from_wei(balance, 'ether')  # Assuming RWT has 18 decimals like typical ERC20 tokens
 
 # Function to claim rewards
 def claim_rewards(private_key):
@@ -40,18 +64,20 @@ def claim_rewards(private_key):
         account = web3.eth.account.from_key(private_key)
         sender_address = account.address
 
+        # Cek status klaim rewards
         genesis_reward_claimed = contract.functions.userGenesisClaimStatus(sender_address).call()
         current_epoch = contract.functions.currentEpoch().call()
         reward_claim_status = contract.functions.userClaimStatus(sender_address, current_epoch).call()
         buffer_amount, claim_status = reward_claim_status
+
         
         if genesis_reward_claimed:
             if not claim_status:
                 print(Fore.GREEN + f"Proceeding to claim reward for address: {sender_address} (Genesis reward claimed).")
                 proceed_to_claim(sender_address, private_key)
             else:
-                print(Fore.YELLOW + f"Reward already claimed for address: {sender_address} in epoch {current_epoch}. Waiting 2 hours before next attempt.")
-                animated_countdown(2 * 60 * 60)  # Menunggu dengan animasi selama 2 jam
+                print(Fore.YELLOW + f"Reward already claimed for address: {sender_address} in epoch {current_epoch}.")
+                return True  # Return True untuk menandakan sudah diklaim
         else:
             print(Fore.GREEN + f"Proceeding to claim reward for address: {sender_address} (Genesis reward not claimed).")
             proceed_to_claim(sender_address, private_key)
@@ -64,6 +90,8 @@ def claim_rewards(private_key):
             print(Fore.RED + f"Error for address {sender_address}: Insufficient funds for gas.")
         else:
             print(Fore.RED + f"Error for address {sender_address}: {error_message}")
+    
+    return False  
 
 # Function to claim the reward
 def proceed_to_claim(sender_address, private_key):
@@ -113,10 +141,47 @@ def animated_countdown(seconds):
         time.sleep(0.5)
     sys.stdout.write("\r" + " " * 80 + "\r")
 
-# Main execution
+# Main execution loop with infinite cycle
 if __name__ == '__main__':
     display_header()
     private_keys = load_private_keys('private_keys.txt')
-    for private_key in private_keys:
-        animated_countdown(5)  
-        claim_rewards(private_key)
+
+    try:
+        while True:  # Loop terus menerus sampai dihentikan oleh user (misalnya dengan Ctrl+C)
+            all_claimed = True
+            for idx, private_key in enumerate(private_keys, start=1):
+                account = web3.eth.account.from_key(private_key)
+                sender_address = account.address
+
+                # Countdown sebelum memproses klaim reward
+                animated_countdown(5)
+                
+                # Tampilkan akun dan alamatnya
+                print(Fore.CYAN + f"Akun {idx} - {sender_address}")
+
+                # Proses klaim reward terlebih dahulu
+                claimed = claim_rewards(private_key)
+
+                # Cek saldo RWT setelah pengecekan klaim reward
+                rwt_balance = get_rwt_balance(sender_address)
+                print(Fore.MAGENTA + f"Balance = {rwt_balance} RewardToken (RWT)\n")
+
+                # Jika ada akun yang belum meng-claim reward, maka set all_claimed menjadi False
+                current_epoch = contract.functions.currentEpoch().call()
+                reward_claim_status = contract.functions.userClaimStatus(sender_address, current_epoch).call()
+                _, claim_status = reward_claim_status
+
+                if not claim_status:
+                    all_claimed = False
+
+                n
+                print(Fore.CYAN + "-------------------------------------------")
+
+            if all_claimed:
+                print(Fore.CYAN + "All accounts have claimed their rewards. Waiting before the next cycle.")
+                animated_countdown(6 * 60 * 60)  
+            else:
+                print(Fore.CYAN + "Some accounts still have pending rewards. Continuing to the next round.")
+                
+    except KeyboardInterrupt:
+        print(Fore.RED + "\nProcess terminated by user.")
