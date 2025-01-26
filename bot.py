@@ -16,14 +16,31 @@ def display_header():
     """
     print(Fore.CYAN + Style.BRIGHT + header_text + "\n")
 
-# Blockchain setup and connection
-def setup_blockchain_connection(rpc_url):
-    web3 = Web3(Web3.HTTPProvider(rpc_url))
+def load_proxies(file_path):
+    try:
+        with open(file_path, 'r') as file:
+            return [line.strip() for line in file if line.strip()]
+    except FileNotFoundError:
+        print(Fore.RED + f"代理文件 {file_path} 未找到")
+        return []
+
+def setup_blockchain_connection(rpc_url, proxy=None):
+    session = None
+    if proxy:
+        from requests import Session
+        session = Session()
+        session.proxies = {
+            'http': proxy,
+            'https': proxy
+        }
+    
+    provider = Web3.HTTPProvider(rpc_url, session=session)
+    web3 = Web3(provider)
     if web3.is_connected():
-        print(Fore.GREEN + "Connected to Humanity Protocol")
+        print(Fore.GREEN + "已连接到 Humanity Protocol")
     else:
-        print(Fore.RED + "Connection failed.")
-        sys.exit(1)  # Exit if connection fails
+        print(Fore.RED + "连接失败")
+        sys.exit(1)
     return web3
 
 # Load private keys from a file
@@ -32,7 +49,7 @@ def load_private_keys(file_path):
         return [line.strip() for line in file if line.strip()]
 
 # Check if reward needs to be claimed
-def claim_rewards(private_key, web3, contract):
+def claim_rewards(private_key, web3, contract, retry_count=0):
     try:
         account = web3.eth.account.from_key(private_key)
         sender_address = account.address
@@ -50,18 +67,31 @@ def claim_rewards(private_key, web3, contract):
             print(Fore.YELLOW + f"Reward already claimed for address: {sender_address} in epoch {current_epoch}. Skipping.")
 
     except Exception as e:
-        handle_error(e, sender_address)
+        handle_error(e, sender_address, private_key, web3, contract, retry_count)
 
-# Handle specific errors for clarity
-def handle_error(e, address):
+def handle_error(e, address, private_key, web3, contract, retry_count=0):
+    # 最大重试次数
+    MAX_RETRIES = 10
+    
     error_message = str(e)
     if "Rewards: user not registered" in error_message:
-        print(Fore.RED + f"Error: User {address} is not registered.")
+        if retry_count < MAX_RETRIES:
+            print(Fore.YELLOW + f"用户 {address} 未注册，3秒后进行第 {retry_count + 1} 次重试...")
+            time.sleep(3)
+            try:
+                claim_rewards(private_key, web3, contract, retry_count + 1)
+            except Exception as retry_error:
+                print(Fore.RED + f"重试失败，用户 {address}: {str(retry_error)}")
+        else:
+            print(Fore.RED + f"达到最大重试次数 ({MAX_RETRIES})，用户 {address} 注册检查失败")
     else:
         print(Fore.RED + f"Error claiming reward for {address}: {error_message}")
 
 # Process the claim reward transaction
-def process_claim(sender_address, private_key, web3, contract):
+def process_claim(sender_address, private_key, web3, contract, retry_count=0):
+    # 最大重试次数
+    MAX_RETRIES = 10
+    
     try:
         gas_amount = contract.functions.claimReward().estimate_gas({
             'chainId': web3.eth.chain_id,
@@ -82,23 +112,43 @@ def process_claim(sender_address, private_key, web3, contract):
         print(Fore.GREEN + f"Transaction successful for {sender_address} with hash: {web3.to_hex(tx_hash)}")
 
     except Exception as e:
-        print(Fore.RED + f"Error processing claim for {sender_address}: {str(e)}")
+        if retry_count < MAX_RETRIES:
+            print(Fore.YELLOW + f"处理交易时出错 {sender_address}: {str(e)}，3秒后进行第 {retry_count + 1} 次重试...")
+            time.sleep(3)
+            process_claim(sender_address, private_key, web3, contract, retry_count + 1)
+        else:
+            print(Fore.RED + f"达到最大重试次数 ({MAX_RETRIES})，地址 {sender_address} 处理失败: {str(e)}")
 
 # Main execution
 if __name__ == "__main__":
     display_header()
+
+
+
     rpc_url = 'https://rpc.testnet.humanity.org'
-    web3 = setup_blockchain_connection(rpc_url)
+     # 加载代理列表
+    proxies = load_proxies('proxies.txt')
+    private_keys = load_private_keys('private_keys.txt')
     
-    contract_address = '0xa18f6FCB2Fd4884436d10610E69DB7BFa1bFe8C7'
-    contract_abi = [{"inputs":[],"name":"AccessControlBadConfirmation","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"},{"internalType":"bytes32","name":"neededRole","type":"bytes32"}],"name":"AccessControlUnauthorizedAccount","type":"error"},{"inputs":[],"name":"InvalidInitialization","type":"error"},{"inputs":[],"name":"NotInitializing","type":"error"},{"anonymous":False,"inputs":[{"indexed":False,"internalType":"uint64","name":"version","type":"uint64"}],"name":"Initialized","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"address","name":"from","type":"address"},{"indexed":True,"internalType":"address","name":"to","type":"address"},{"indexed":False,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":False,"internalType":"bool","name":"bufferSafe","type":"bool"}],"name":"ReferralRewardBuffered","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"address","name":"user","type":"address"},{"indexed":True,"internalType":"enum IRewards.RewardType","name":"rewardType","type":"uint8"},{"indexed":False,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"RewardClaimed","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"bytes32","name":"role","type":"bytes32"},{"indexed":True,"internalType":"bytes32","name":"previousAdminRole","type":"bytes32"},{"indexed":True,"internalType":"bytes32","name":"newAdminRole","type":"bytes32"}],"name":"RoleAdminChanged","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"bytes32","name":"role","type":"bytes32"},{"indexed":True,"internalType":"address","name":"account","type":"address"},{"indexed":True,"internalType":"address","name":"sender","type":"address"}],"name":"RoleGranted","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"bytes32","name":"role","type":"bytes32"},{"indexed":True,"internalType":"address","name":"account","type":"address"},{"indexed":True,"internalType":"address","name":"sender","type":"address"}],"name":"RoleRevoked","type":"event"},{"inputs":[],"name":"DEFAULT_ADMIN_ROLE","outputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"claimBuffer","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"claimReward","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"currentEpoch","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"cycleStartTimestamp","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"}],"name":"getRoleAdmin","outputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"account","type":"address"}],"name":"grantRole","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"account","type":"address"}],"name":"hasRole","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"vcContract","type":"address"},{"internalType":"address","name":"tkn","type":"address"}],"name":"init","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"callerConfirmation","type":"address"}],"name":"renounceRole","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"account","type":"address"}],"name":"revokeRole","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"startTimestamp","type":"uint256"}],"name":"start","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"stop","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes4","name":"interfaceId","type":"bytes4"}],"name":"supportsInterface","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"}],"name":"userBuffer","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"},{"internalType":"uint256","name":"epochID","type":"uint256"}],"name":"userClaimStatus","outputs":[{"components":[{"internalType":"uint256","name":"buffer","type":"uint256"},{"internalType":"bool","name":"claimStatus","type":"bool"}],"internalType":"struct IRewards.UserClaim","name":"","type":"tuple"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"}],"name":"userGenesisClaimStatus","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"}]  # Place the ABI here
-    contract = web3.eth.contract(address=Web3.to_checksum_address(contract_address), abi=contract_abi)
+    # 确保代理数量与私钥数量匹配
+    if proxies and len(proxies) < len(private_keys):
+        print(Fore.YELLOW + "警告：代理数量少于私钥数量，部分账户将不使用代理")
+    
+    
+    
 
     # Infinite loop to run every 6 hours
     while True:
-        private_keys = load_private_keys('private_keys.txt')
-        for private_key in private_keys:
+        for i, private_key in enumerate(private_keys):
+            # 如果有代理可用，则使用代理
+            proxy = proxies[i] if proxies and i < len(proxies) else None
+            web3 = setup_blockchain_connection(rpc_url, proxy)
+            contract_address = '0xa18f6FCB2Fd4884436d10610E69DB7BFa1bFe8C7'
+            contract_abi = [{"inputs":[],"name":"AccessControlBadConfirmation","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"},{"internalType":"bytes32","name":"neededRole","type":"bytes32"}],"name":"AccessControlUnauthorizedAccount","type":"error"},{"inputs":[],"name":"InvalidInitialization","type":"error"},{"inputs":[],"name":"NotInitializing","type":"error"},{"anonymous":False,"inputs":[{"indexed":False,"internalType":"uint64","name":"version","type":"uint64"}],"name":"Initialized","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"address","name":"from","type":"address"},{"indexed":True,"internalType":"address","name":"to","type":"address"},{"indexed":False,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":False,"internalType":"bool","name":"bufferSafe","type":"bool"}],"name":"ReferralRewardBuffered","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"address","name":"user","type":"address"},{"indexed":True,"internalType":"enum IRewards.RewardType","name":"rewardType","type":"uint8"},{"indexed":False,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"RewardClaimed","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"bytes32","name":"role","type":"bytes32"},{"indexed":True,"internalType":"bytes32","name":"previousAdminRole","type":"bytes32"},{"indexed":True,"internalType":"bytes32","name":"newAdminRole","type":"bytes32"}],"name":"RoleAdminChanged","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"bytes32","name":"role","type":"bytes32"},{"indexed":True,"internalType":"address","name":"account","type":"address"},{"indexed":True,"internalType":"address","name":"sender","type":"address"}],"name":"RoleGranted","type":"event"},{"anonymous":False,"inputs":[{"indexed":True,"internalType":"bytes32","name":"role","type":"bytes32"},{"indexed":True,"internalType":"address","name":"account","type":"address"},{"indexed":True,"internalType":"address","name":"sender","type":"address"}],"name":"RoleRevoked","type":"event"},{"inputs":[],"name":"DEFAULT_ADMIN_ROLE","outputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"claimBuffer","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"claimReward","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"currentEpoch","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"cycleStartTimestamp","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"}],"name":"getRoleAdmin","outputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"account","type":"address"}],"name":"grantRole","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"account","type":"address"}],"name":"hasRole","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"vcContract","type":"address"},{"internalType":"address","name":"tkn","type":"address"}],"name":"init","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"callerConfirmation","type":"address"}],"name":"renounceRole","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"account","type":"address"}],"name":"revokeRole","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"startTimestamp","type":"uint256"}],"name":"start","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"stop","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes4","name":"interfaceId","type":"bytes4"}],"name":"supportsInterface","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"}],"name":"userBuffer","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"},{"internalType":"uint256","name":"epochID","type":"uint256"}],"name":"userClaimStatus","outputs":[{"components":[{"internalType":"uint256","name":"buffer","type":"uint256"},{"internalType":"bool","name":"claimStatus","type":"bool"}],"internalType":"struct IRewards.UserClaim","name":"","type":"tuple"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"}],"name":"userGenesisClaimStatus","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"}]  # Place the ABI here
+            contract = web3.eth.contract(address=Web3.to_checksum_address(contract_address), abi=contract_abi)
+           
+            contract = web3.eth.contract(address=Web3.to_checksum_address(contract_address), abi=contract_abi)
             claim_rewards(private_key, web3, contract)
         
-        print(Fore.CYAN + "Waiting for 6 hours before the next run...")
-        time.sleep(6 * 60 * 60)  # For testing purposes, you may want to reduce this time
+        print(Fore.CYAN + "等待6小时后进行下一轮...")
+        time.sleep(6 * 60 * 60)
