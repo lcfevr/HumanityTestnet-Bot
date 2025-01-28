@@ -71,7 +71,7 @@ def claim_rewards(private_key, web3, contract, retry_count=0):
 
 def handle_error(e, address, private_key, web3, contract, retry_count=0):
     # 最大重试次数
-    MAX_RETRIES = 10
+    MAX_RETRIES = 2
     
     error_message = str(e)
     if "Rewards: user not registered" in error_message:
@@ -90,7 +90,7 @@ def handle_error(e, address, private_key, web3, contract, retry_count=0):
 # Process the claim reward transaction
 def process_claim(sender_address, private_key, web3, contract, retry_count=0):
     # 最大重试次数
-    MAX_RETRIES = 10
+    MAX_RETRIES = 2
     
     try:
         gas_amount = contract.functions.claimReward().estimate_gas({
